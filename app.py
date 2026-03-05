@@ -5,7 +5,7 @@ from flask import Flask, jsonify, render_template
 import config
 from scanner import scan_many
 from store import DeviceStore
-from vendor import load_oui_file, vendor_lookup_local, vendor_lookup_remote
+from vendor import load_oui_file, vendor_lookup
 
 from driver_check import npcap_installed, install_npcap
 
@@ -15,10 +15,9 @@ store = DeviceStore()
 # Load OUI mapping once (if using local)
 OUI_MAP = load_oui_file(config.LOCAL_OUI_PATH)
 
+
 def resolve_vendor(mac: str) -> str:
-    if config.VENDOR_LOOKUP_MODE == "remote":
-        return vendor_lookup_remote(mac)
-    return vendor_lookup_local(mac, OUI_MAP)
+    return vendor_lookup(mac)
 
 def is_known(mac: str):
     mac = mac.lower()

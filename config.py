@@ -10,10 +10,11 @@ KNOWN_DEVICES = {
 }
 
 # How often to rescan (seconds) when running continuous scans
-SCAN_INTERVAL_SEC = 30
+SCAN_INTERVAL_SEC = 60
 
 # Vendor lookup: choose "local" (OUI file) or "remote" (API)
 VENDOR_LOOKUP_MODE = "remote"  # "remote" also supported
 
 # If using local OUI file, path to file (download step below)
 LOCAL_OUI_PATH = "oui.txt"
+
