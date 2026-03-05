@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Network Device Scanner</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>Network Device Scanner</h1>
+
+    <div class="cards">
+      <div class="card"><div class="label">Total</div><div id="total" class="value">-</div></div>
+      <div class="card"><div class="label">Known</div><div id="known" class="value">-</div></div>
+      <div class="card warn"><div class="label">Unknown</div><div id="unknown" class="value">-</div></div>
+    </div>
+
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Name</th>
+          <th>IP</th>
+          <th>MAC</th>
+          <th>Vendor</th>
+          <th>First Seen</th>
+          <th>Last Seen</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <p class="hint">Unknown devices are highlighted. Update <code>config.KNOWN_DEVICES</code> to mark trusted MACs.</p>
+  </div>
+
+<script>
+async function refresh() {
+  const res = await fetch("/api/devices");
+  const data = await res.json();
+
+  document.getElementById("total").textContent = data.summary.total;
+  document.getElementById("known").textContent = data.summary.known;
+  document.getElementById("unknown").textContent = data.summary.unknown;
+
+  const tbody = document.querySelector("#tbl tbody");
+  tbody.innerHTML = "";
+
+  data.devices
+    .sort((a,b) => (a.known === b.known) ? a.mac.localeCompare(b.mac) : (a.known ? 1 : -1))
+    .forEach(d => {
+      const tr = document.createElement("tr");
+      tr.className = d.known ? "known" : "unknown";
+      tr.innerHTML = `
+        <td>${d.known ? "KNOWN" : "UNKNOWN"}</td>
+        <td>${d.name || ""}</td>
+        <td>${d.ip}</td>
+        <td><code>${d.mac}</code></td>
+        <td>${d.vendor}</td>
+        <td><code>${d.first_seen}</code></td>
+        <td><code>${d.last_seen}</code></td>
+      `;
+      tbody.appendChild(tr);
+    });
+}
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
