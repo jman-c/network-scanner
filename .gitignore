@@ -13,3 +13,6 @@ vendor_cache.json
 # virtual env
 .venv/
 .env
+
+# tests
+tests/
