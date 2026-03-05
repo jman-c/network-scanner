@@ -11,5 +11,5 @@ vendor_cache.json
 *.log
 
 # virtual env
-venv/
+.venv/
 .env
