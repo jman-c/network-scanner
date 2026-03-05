@@ -5,11 +5,22 @@ from flask import Flask, jsonify, render_template
 import config
 from scanner import scan_many
 from store import DeviceStore
-from vendor import vendor_lookup
+from vendor import load_oui_file, vendor_lookup
 from hostname import reverse_dns
 
 app = Flask(__name__)
 store = DeviceStore()
+
+# Optional: load local OUI mapping if you have oui.txt.
+# If you don't have the file, it just loads empty and continues.
+LOCAL_OUI_MAP = {}
+try:
+    local_path = getattr(config, "LOCAL_OUI_PATH", "oui.txt")
+    LOCAL_OUI_MAP = load_oui_file(local_path)
+    if LOCAL_OUI_MAP:
+        print(f"[vendor] loaded {len(LOCAL_OUI_MAP)} OUIs from {local_path}")
+except Exception:
+    LOCAL_OUI_MAP = {}
 
 
 def is_known(mac: str):
@@ -17,10 +28,6 @@ def is_known(mac: str):
     if mac in config.KNOWN_DEVICES:
         return True, config.KNOWN_DEVICES[mac]
     return False, None
-
-
-def resolve_vendor(mac: str) -> str:
-    return vendor_lookup(mac)
 
 
 def scan_loop():
@@ -34,37 +41,45 @@ def scan_loop():
             print(f"[scan_loop] iface={iface} cidrs={config.SCAN_CIDRS} -> found {len(rows)} devices")
 
             for r in rows:
-                mac = r["mac"]
+                mac = r["mac"].lower()
                 ip = r["ip"]
 
-                # Check if device is known
                 known, friendly_name = is_known(mac)
 
-                # Vendor lookup
-                vendor = resolve_vendor(mac)
+                # Only enrich NEW devices (fast + fewer network calls)
+                if not store.has(mac):
+                    hostname = reverse_dns(ip)
+                    vendor = vendor_lookup(mac, local_oui_map=LOCAL_OUI_MAP, use_remote=True)
 
-                # Hostname detection
-                hostname = reverse_dns(ip)
+                    # Optional fallback: if no friendly name configured, use hostname
+                    if not friendly_name and hostname:
+                        friendly_name = hostname
 
-                # Optional fallback: use hostname as friendly name
-                if not friendly_name and hostname:
-                    friendly_name = hostname
+                    store.upsert(
+                        ip=ip,
+                        mac=mac,
+                        vendor=vendor,
+                        known=known,
+                        friendly_name=friendly_name,
+                        hostname=hostname,
+                    )
+                else:
+                    # Existing device: skip hostname/vendor lookup
+                    store.upsert(
+                        ip=ip,
+                        mac=mac,
+                        vendor=None,
+                        known=known,
+                        friendly_name=friendly_name,  # allow configured names to update
+                        hostname=None,
+                    )
 
-                store.upsert(
-                    ip=ip,
-                    mac=mac,
-                    vendor=vendor,
-                    known=known,
-                    friendly_name=friendly_name,
-                    hostname=hostname,
-                )
-
-            backoff = config.SCAN_INTERVAL_SEC  # reset on success
+            backoff = config.SCAN_INTERVAL_SEC
 
         except Exception as e:
             msg = str(e)
             print(f"[scan_loop] error: {msg}")
-            backoff = min(backoff * 2, 300)  # exponential backoff up to 5 minutes
+            backoff = min(backoff * 2, 300)
 
         time.sleep(backoff)
 

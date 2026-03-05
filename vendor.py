@@ -1,27 +1,53 @@
+import json
+import os
 import re
 import time
-from typing import Dict
+from typing import Dict, Optional
+
 import requests
 
-OUI_LINE_RE = re.compile(
-    r"^([0-9A-F]{2}-[0-9A-F]{2}-[0-9A-F]{2})\s+\(hex\)\s+(.+)$"
-)
+# ---------------------------
+# Persistent vendor cache
+# ---------------------------
 
+CACHE_PATH = "vendor_cache.json"
+
+def _load_persistent_cache() -> Dict[str, str]:
+    if os.path.exists(CACHE_PATH):
+        try:
+            with open(CACHE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    # normalize keys to lowercase
+                    return {k.lower(): str(v) for k, v in data.items()}
+        except Exception:
+            pass
+    return {}
+
+def _save_persistent_cache(cache: Dict[str, str]) -> None:
+    try:
+        with open(CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2, sort_keys=True)
+    except Exception:
+        pass
+
+_PERSIST_CACHE: Dict[str, str] = _load_persistent_cache()
+
+# ---------------------------
+# Local OUI file support (optional)
+# ---------------------------
+
+OUI_LINE_RE = re.compile(r"^([0-9A-F]{2}-[0-9A-F]{2}-[0-9A-F]{2})\s+\(hex\)\s+(.+)$")
 
 def _normalize_mac(mac: str) -> str:
     return mac.strip().lower().replace("-", ":")
 
-
 def oui_of(mac: str) -> str:
-    """
-    Return the first 3 bytes of a MAC address as an OUI (aa:bb:cc).
-    """
     mac = _normalize_mac(mac)
     parts = mac.split(":")
     if len(parts) < 3:
         return ""
     return ":".join(parts[:3])
-
 
 def load_oui_file(path: str) -> Dict[str, str]:
     """
@@ -30,7 +56,6 @@ def load_oui_file(path: str) -> Dict[str, str]:
     Returns mapping "fc:34:97" -> "Cisco Systems, Inc"
     """
     mapping: Dict[str, str] = {}
-
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
@@ -41,83 +66,48 @@ def load_oui_file(path: str) -> Dict[str, str]:
                     mapping[oui_dash.replace("-", ":")] = vendor
     except FileNotFoundError:
         pass
-
     return mapping
-
 
 def vendor_lookup_local(mac: str, oui_map: Dict[str, str]) -> str:
     return oui_map.get(oui_of(mac), "Unknown")
 
+# ---------------------------
+# Remote lookup (rate-limit safe)
+# ---------------------------
 
-# ---------------------------------------------------
-# Remote lookup system
-# ---------------------------------------------------
-
-# Cache results by OUI to prevent API spam
+# In-memory OUI cache to avoid repeated lookups within a run
 _OUI_VENDOR_CACHE: Dict[str, str] = {}
 
-# Cooldown tracking if API rate limits us
+# Cooldown if we get rate-limited (per OUI)
 _OUI_COOLDOWN_UNTIL: Dict[str, float] = {}
 
-
-def vendor_lookup_remote(mac: str) -> str:
+def _vendor_lookup_remote_macvendors(probe_mac: str) -> str:
     """
-    Vendor lookup using macvendors.com
-    with caching + cooldown to avoid rate limits.
+    Uses macvendors.com. Note: it can rate-limit aggressively.
+    It may return HTTP 200 with a JSON error body, so we detect that.
     """
-
-    mac = _normalize_mac(mac)
-    o = oui_of(mac)
-
-    if not o:
-        return "Unknown"
-
-    # Return cached result if available
-    if o in _OUI_VENDOR_CACHE:
-        return _OUI_VENDOR_CACHE[o]
-
-    # Respect cooldown if previously rate-limited
-    now = time.time()
-    if _OUI_COOLDOWN_UNTIL.get(o, 0) > now:
-        return "Unknown"
-
-    probe_mac = f"{o}:00:00:00"
-
     try:
-        r = requests.get(
-            f"https://api.macvendors.com/{probe_mac}",
-            timeout=5
-        )
-
+        r = requests.get(f"https://api.macvendors.com/{probe_mac}", timeout=5)
         text = (r.text or "").strip()
 
-        # macvendors returns JSON error when rate limited
+        # Rate limit / error message (often JSON text)
         if "Please slow down your requests" in text or "Too Many" in text:
-            _OUI_COOLDOWN_UNTIL[o] = now + 600  # 10 minute cooldown
-            return "Unknown"
+            return "RATE_LIMIT"
 
         if r.status_code == 200 and text:
-
-            # If response looks like JSON error
+            # If it looks like JSON, treat as unknown/error
             if text.startswith("{") and text.endswith("}"):
-                vendor = "Unknown"
-            else:
-                vendor = text
-
-            _OUI_VENDOR_CACHE[o] = vendor
-            return vendor
-
+                return "Unknown"
+            return text
     except Exception:
         pass
 
-    _OUI_VENDOR_CACHE[o] = "Unknown"
     return "Unknown"
-
 
 def is_locally_administered(mac: str) -> bool:
     """
-    Detect locally administered MAC addresses
-    (often randomized for privacy).
+    Locally administered MAC = second least significant bit of first octet is 1.
+    Often indicates randomized/private MAC (phones/laptops on Wi-Fi).
     """
     try:
         first_octet = int(_normalize_mac(mac).split(":")[0], 16)
@@ -125,20 +115,64 @@ def is_locally_administered(mac: str) -> bool:
     except Exception:
         return False
 
-
-def vendor_lookup(mac: str) -> str:
+def vendor_lookup(
+    mac: str,
+    local_oui_map: Optional[Dict[str, str]] = None,
+    use_remote: bool = True,
+) -> str:
     """
-    Best-effort vendor lookup.
+    Best-effort vendor lookup:
+      1) Persistent cache (OUI -> vendor)
+      2) Local OUI file (if provided)
+      3) Remote lookup (rate-limit safe) once per OUI (cached)
+      4) If still Unknown and locally administered -> label randomized
 
-    Steps:
-    1. Check OUI cache
-    2. Remote lookup
-    3. If unknown + locally administered -> label randomized
+    Pass local_oui_map if you have one; otherwise it will skip local lookup.
     """
+    mac = _normalize_mac(mac)
+    o = oui_of(mac)
+    if not o:
+        return "Unknown"
 
-    vendor = vendor_lookup_remote(mac)
+    # 1) Persistent cache
+    if o in _PERSIST_CACHE and _PERSIST_CACHE[o]:
+        return _PERSIST_CACHE[o]
 
-    if vendor == "Unknown" and is_locally_administered(mac):
+    # 2) Local OUI map (optional)
+    if local_oui_map:
+        v_local = local_oui_map.get(o, "Unknown")
+        if v_local != "Unknown":
+            _PERSIST_CACHE[o] = v_local
+            _save_persistent_cache(_PERSIST_CACHE)
+            return v_local
+
+    # 3) Remote (optional)
+    if use_remote:
+        # In-memory cache
+        if o in _OUI_VENDOR_CACHE:
+            v = _OUI_VENDOR_CACHE[o]
+        else:
+            now = time.time()
+            if _OUI_COOLDOWN_UNTIL.get(o, 0) > now:
+                v = "Unknown"
+            else:
+                probe_mac = f"{o}:00:00:00"
+                v = _vendor_lookup_remote_macvendors(probe_mac)
+
+                if v == "RATE_LIMIT":
+                    # cooldown for 10 minutes to stop hammering
+                    _OUI_COOLDOWN_UNTIL[o] = now + 600
+                    v = "Unknown"
+
+            _OUI_VENDOR_CACHE[o] = v
+
+        if v != "Unknown":
+            _PERSIST_CACHE[o] = v
+            _save_persistent_cache(_PERSIST_CACHE)
+            return v
+
+    # 4) Randomized label
+    if is_locally_administered(mac):
         return "Randomized / Locally administered"
 
-    return vendor
+    return "Unknown"

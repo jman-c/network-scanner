@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+
+# runtime data
+vendor_cache.json
+*.db
+*.sqlite
+
+# logs
+*.log
+
+# virtual env
+venv/
+.env
