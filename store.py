@@ -8,19 +8,29 @@ class Device:
     ip: str
     mac: str
     vendor: str
+    hostname: Optional[str]
+    friendly_name: Optional[str]
     first_seen: str
     last_seen: str
     known: bool
-    name: Optional[str] = None
 
 class DeviceStore:
     def __init__(self):
         self._lock = Lock()
         self._devices: Dict[str, Device] = {}  # key by MAC
 
-    def upsert(self, ip: str, mac: str, vendor: str, known: bool, name: Optional[str]):
+    def upsert(
+        self,
+        ip: str,
+        mac: str,
+        vendor: str,
+        known: bool,
+        friendly_name: Optional[str],
+        hostname: Optional[str],
+    ):
         now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
         mac = mac.lower()
+
         with self._lock:
             if mac in self._devices:
                 d = self._devices[mac]
@@ -28,16 +38,20 @@ class DeviceStore:
                 d.vendor = vendor
                 d.last_seen = now
                 d.known = known
-                d.name = name
+                d.friendly_name = friendly_name
+                # Only update hostname if we got a non-empty value
+                if hostname:
+                    d.hostname = hostname
             else:
                 self._devices[mac] = Device(
                     ip=ip,
                     mac=mac,
                     vendor=vendor,
+                    hostname=hostname,
+                    friendly_name=friendly_name,
                     first_seen=now,
                     last_seen=now,
                     known=known,
-                    name=name,
                 )
 
     def all(self):

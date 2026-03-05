@@ -19,7 +19,8 @@
       <thead>
         <tr>
           <th>Status</th>
-          <th>Name</th>
+          <th>Friendly Name</th>
+          <th>Hostname</th>
           <th>IP</th>
           <th>MAC</th>
           <th>Vendor</th>
@@ -30,7 +31,9 @@
       <tbody></tbody>
     </table>
 
-    <p class="hint">Unknown devices are highlighted. Update <code>config.KNOWN_DEVICES</code> to mark trusted MACs.</p>
+    <p class="hint">
+      Unknown devices are highlighted. Update <code>config.KNOWN_DEVICES</code> to mark trusted MACs.
+    </p>
   </div>
 
 <script>
@@ -50,21 +53,24 @@ async function refresh() {
     .forEach(d => {
       const tr = document.createElement("tr");
       tr.className = d.known ? "known" : "unknown";
+
       tr.innerHTML = `
         <td>${d.known ? "KNOWN" : "UNKNOWN"}</td>
-        <td>${d.name || ""}</td>
+        <td>${d.friendly_name || ""}</td>
+        <td>${d.hostname || ""}</td>
         <td>${d.ip}</td>
         <td><code>${d.mac}</code></td>
         <td>${d.vendor}</td>
         <td><code>${d.first_seen}</code></td>
         <td><code>${d.last_seen}</code></td>
       `;
+
       tbody.appendChild(tr);
     });
 }
 
 refresh();
-setInterval(refresh, 3000);
+setInterval(refresh, 5000);
 </script>
 </body>
 </html>
