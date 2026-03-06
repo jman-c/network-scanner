@@ -14,5 +14,7 @@ LOCAL_OUI_PATH = "oui.txt"
 
 # Monitoring
 ALERT_ON_NEW_DEVICE = True
-ALERT_WEBHOOK_URL = ""  # optional, e.g. Discord/Slack webhook
+ALERT_WEBHOOK_URL = ""
+
+DB_PATH = "net_scanner.db"
 

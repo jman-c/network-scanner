@@ -1,47 +1,23 @@
-import json
-import os
 import threading
 import time
 from datetime import datetime
-from typing import Dict, Any, Set
+from typing import Dict, Any
 
 import requests
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template
 
 import config
+from db import init_db
 from scanner import scan_many
 from store import DeviceStore
 from vendor import load_oui_file, vendor_lookup
 from hostname import reverse_dns
 
 app = Flask(__name__)
-store = DeviceStore()
 
-SEEN_MACS_PATH = "seen_macs.json"
-
-
-def load_seen_macs(path: str) -> Set[str]:
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    return {str(x).lower() for x in data}
-        except Exception:
-            pass
-    return set()
-
-
-def save_seen_macs(path: str, seen: Set[str]) -> None:
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(sorted(list(seen)), f, indent=2)
-    except Exception:
-        pass
-
-
-# Load persisted “seen” set (prevents startup alert spam)
-SEEN_MACS: Set[str] = load_seen_macs(SEEN_MACS_PATH)
+DB_PATH = getattr(config, "DB_PATH", "net_scanner.db")
+init_db(DB_PATH)
+store = DeviceStore(DB_PATH)
 
 # Optional: load local OUI mapping if present (safe if missing)
 LOCAL_OUI_MAP = {}
@@ -63,7 +39,6 @@ def is_known(mac: str):
 
 def make_alert(alert_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
-    # stable-ish unique id (good enough for UI): time + mac
     mac = payload.get("mac", "")
     alert_id = f"{ts}:{mac}"
     out = {"id": alert_id, "type": alert_type, "time": ts}
@@ -73,7 +48,6 @@ def make_alert(alert_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def scan_loop():
     backoff = config.SCAN_INTERVAL_SEC
-    last_seen_save = 0.0
 
     while True:
         try:
@@ -87,9 +61,9 @@ def scan_loop():
                 ip = r["ip"]
 
                 known, friendly_name = is_known(mac)
-                is_new_in_memory = not store.has(mac)
+                is_new_device = not store.has(mac)
 
-                if is_new_in_memory:
+                if is_new_device:
                     # Enrich only NEW devices (fast)
                     hostname = reverse_dns(ip)
                     vendor = vendor_lookup(mac, local_oui_map=LOCAL_OUI_MAP, use_remote=True)
@@ -107,8 +81,7 @@ def scan_loop():
                         hostname=hostname,
                     )
 
-                    # Alert only if this MAC has never been seen across restarts
-                    if getattr(config, "ALERT_ON_NEW_DEVICE", True) and (mac not in SEEN_MACS):
+                    if getattr(config, "ALERT_ON_NEW_DEVICE", True):
                         alert = make_alert(
                             "new_device",
                             {
@@ -130,9 +103,6 @@ def scan_loop():
                             except Exception:
                                 pass
 
-                    # Mark as seen (persisted)
-                    SEEN_MACS.add(mac)
-
                 else:
                     # Existing device: skip hostname/vendor lookup
                     store.upsert(
@@ -140,15 +110,9 @@ def scan_loop():
                         mac=mac,
                         vendor=None,
                         known=known,
-                        friendly_name=friendly_name,  # allow configured names to update
+                        friendly_name=friendly_name,
                         hostname=None,
                     )
-
-            # Save seen MACs occasionally (every ~30s max) to reduce disk writes
-            now = time.time()
-            if now - last_seen_save > 30:
-                save_seen_macs(SEEN_MACS_PATH, SEEN_MACS)
-                last_seen_save = now
 
             backoff = config.SCAN_INTERVAL_SEC
 

@@ -1,37 +1,47 @@
-import json
-import os
 import re
 import time
+from datetime import datetime
 from typing import Dict, Optional
 
 import requests
 
+from db import get_conn
+
 # ---------------------------
-# Persistent vendor cache
+# SQLite-backed persistent vendor cache
 # ---------------------------
 
-CACHE_PATH = "vendor_cache.json"
-
-def _load_persistent_cache() -> Dict[str, str]:
-    if os.path.exists(CACHE_PATH):
-        try:
-            with open(CACHE_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    # normalize keys to lowercase
-                    return {k.lower(): str(v) for k, v in data.items()}
-        except Exception:
-            pass
-    return {}
-
-def _save_persistent_cache(cache: Dict[str, str]) -> None:
+def _load_vendor_from_db(oui_prefix: str) -> Optional[str]:
     try:
-        with open(CACHE_PATH, "w", encoding="utf-8") as f:
-            json.dump(cache, f, indent=2, sort_keys=True)
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT vendor_name FROM vendor_cache WHERE oui_prefix = ?",
+                (oui_prefix.lower(),),
+            ).fetchone()
+            if row:
+                return str(row["vendor_name"])
+    except Exception:
+        pass
+    return None
+
+
+def _save_vendor_to_db(oui_prefix: str, vendor_name: str) -> None:
+    try:
+        ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        with get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO vendor_cache (oui_prefix, vendor_name, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(oui_prefix) DO UPDATE SET
+                    vendor_name = excluded.vendor_name,
+                    updated_at = excluded.updated_at
+                """,
+                (oui_prefix.lower(), vendor_name, ts),
+            )
     except Exception:
         pass
 
-_PERSIST_CACHE: Dict[str, str] = _load_persistent_cache()
 
 # ---------------------------
 # Local OUI file support (optional)
@@ -39,8 +49,10 @@ _PERSIST_CACHE: Dict[str, str] = _load_persistent_cache()
 
 OUI_LINE_RE = re.compile(r"^([0-9A-F]{2}-[0-9A-F]{2}-[0-9A-F]{2})\s+\(hex\)\s+(.+)$")
 
+
 def _normalize_mac(mac: str) -> str:
     return mac.strip().lower().replace("-", ":")
+
 
 def oui_of(mac: str) -> str:
     mac = _normalize_mac(mac)
@@ -48,6 +60,7 @@ def oui_of(mac: str) -> str:
     if len(parts) < 3:
         return ""
     return ":".join(parts[:3])
+
 
 def load_oui_file(path: str) -> Dict[str, str]:
     """
@@ -68,8 +81,10 @@ def load_oui_file(path: str) -> Dict[str, str]:
         pass
     return mapping
 
+
 def vendor_lookup_local(mac: str, oui_map: Dict[str, str]) -> str:
     return oui_map.get(oui_of(mac), "Unknown")
+
 
 # ---------------------------
 # Remote lookup (rate-limit safe)
@@ -80,6 +95,7 @@ _OUI_VENDOR_CACHE: Dict[str, str] = {}
 
 # Cooldown if we get rate-limited (per OUI)
 _OUI_COOLDOWN_UNTIL: Dict[str, float] = {}
+
 
 def _vendor_lookup_remote_macvendors(probe_mac: str) -> str:
     """
@@ -104,6 +120,7 @@ def _vendor_lookup_remote_macvendors(probe_mac: str) -> str:
 
     return "Unknown"
 
+
 def is_locally_administered(mac: str) -> bool:
     """
     Locally administered MAC = second least significant bit of first octet is 1.
@@ -115,6 +132,7 @@ def is_locally_administered(mac: str) -> bool:
     except Exception:
         return False
 
+
 def vendor_lookup(
     mac: str,
     local_oui_map: Optional[Dict[str, str]] = None,
@@ -122,7 +140,7 @@ def vendor_lookup(
 ) -> str:
     """
     Best-effort vendor lookup:
-      1) Persistent cache (OUI -> vendor)
+      1) Persistent SQLite cache (OUI -> vendor)
       2) Local OUI file (if provided)
       3) Remote lookup (rate-limit safe) once per OUI (cached)
       4) If still Unknown and locally administered -> label randomized
@@ -134,16 +152,16 @@ def vendor_lookup(
     if not o:
         return "Unknown"
 
-    # 1) Persistent cache
-    if o in _PERSIST_CACHE and _PERSIST_CACHE[o]:
-        return _PERSIST_CACHE[o]
+    # 1) Persistent SQLite cache
+    v_db = _load_vendor_from_db(o)
+    if v_db:
+        return v_db
 
     # 2) Local OUI map (optional)
     if local_oui_map:
         v_local = local_oui_map.get(o, "Unknown")
         if v_local != "Unknown":
-            _PERSIST_CACHE[o] = v_local
-            _save_persistent_cache(_PERSIST_CACHE)
+            _save_vendor_to_db(o, v_local)
             return v_local
 
     # 3) Remote (optional)
@@ -167,8 +185,7 @@ def vendor_lookup(
             _OUI_VENDOR_CACHE[o] = v
 
         if v != "Unknown":
-            _PERSIST_CACHE[o] = v
-            _save_persistent_cache(_PERSIST_CACHE)
+            _save_vendor_to_db(o, v)
             return v
 
     # 4) Randomized label
