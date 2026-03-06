@@ -10,9 +10,26 @@
     <h1>Network Device Scanner</h1>
 
     <div class="cards">
-      <div class="card"><div class="label">Total</div><div id="total" class="value">-</div></div>
-      <div class="card"><div class="label">Known</div><div id="known" class="value">-</div></div>
-      <div class="card warn"><div class="label">Unknown</div><div id="unknown" class="value">-</div></div>
+      <div class="card">
+        <div class="label">Total</div>
+        <div id="total" class="value">-</div>
+      </div>
+      <div class="card">
+        <div class="label">Known</div>
+        <div id="known" class="value">-</div>
+      </div>
+      <div class="card warn">
+        <div class="label">Unknown</div>
+        <div id="unknown" class="value">-</div>
+      </div>
+    </div>
+
+    <div class="alerts">
+      <div class="alerts_header">
+        <h2>Alerts</h2>
+        <button class="btn" id="clear_alerts_btn" type="button">Clear All</button>
+      </div>
+      <div id="alerts_list" class="alerts_list">No alerts yet.</div>
     </div>
 
     <table id="tbl">
@@ -37,7 +54,7 @@
   </div>
 
 <script>
-async function refresh() {
+async function refreshDevices() {
   const res = await fetch("/api/devices");
   const data = await res.json();
 
@@ -48,7 +65,7 @@ async function refresh() {
   const tbody = document.querySelector("#tbl tbody");
   tbody.innerHTML = "";
 
-  data.devices
+  (data.devices || [])
     .sort((a,b) => (a.known === b.known) ? a.mac.localeCompare(b.mac) : (a.known ? 1 : -1))
     .forEach(d => {
       const tr = document.createElement("tr");
@@ -64,13 +81,91 @@ async function refresh() {
         <td><code>${d.first_seen}</code></td>
         <td><code>${d.last_seen}</code></td>
       `;
-
       tbody.appendChild(tr);
     });
 }
 
-refresh();
-setInterval(refresh, 5000);
+async function refreshAlerts() {
+  const res = await fetch("/api/alerts");
+  const data = await res.json();
+
+  const el = document.getElementById("alerts_list");
+  const alerts = data.alerts || [];
+
+  if (alerts.length === 0) {
+    el.textContent = "No alerts yet.";
+    return;
+  }
+
+  el.innerHTML = alerts.slice(0, 10).map(a => {
+    const title = (a.type === "new_device") ? "NEW DEVICE" : (a.type || "ALERT");
+    const name = a.friendly_name || a.hostname || "";
+    const known = a.known ? "KNOWN" : "UNKNOWN";
+
+    // IMPORTANT: store the raw alert id in data-id (no inline onclick)
+    return `
+      <div class="alert_item">
+        <div class="alert_title_row">
+          <div class="alert_title">
+            ${title}
+            <span class="pill ${a.known ? "pill_ok" : "pill_warn"}">${known}</span>
+          </div>
+          <button class="btn btn_small alert_dismiss_btn" type="button"
+                  data-id="${a.id || ""}">
+            Dismiss
+          </button>
+        </div>
+        <div class="alert_body">
+          <div><b>Time:</b> <code>${a.time || ""}</code></div>
+          <div><b>IP:</b> ${a.ip || ""} &nbsp; <b>MAC:</b> <code>${a.mac || ""}</code></div>
+          <div><b>Vendor:</b> ${a.vendor || ""} &nbsp; <b>Name:</b> ${name}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function dismissAlertById(id) {
+  if (!id) return;
+
+  // encode for URL path safety (colons etc.)
+  const url = `/api/alerts/${encodeURIComponent(id)}`;
+
+  const res = await fetch(url, { method: "DELETE" });
+
+  // If something goes wrong, you'll actually see it now:
+  if (!res.ok) {
+    const txt = await res.text();
+    console.error("Dismiss failed:", res.status, txt);
+  }
+
+  await refreshAlerts();
+}
+
+async function clearAlerts() {
+  const res = await fetch("/api/alerts/clear", { method: "POST" });
+  if (!res.ok) {
+    const txt = await res.text();
+    console.error("Clear failed:", res.status, txt);
+  }
+  await refreshAlerts();
+}
+
+async function refreshAll() {
+  await Promise.all([refreshDevices(), refreshAlerts()]);
+}
+
+document.getElementById("clear_alerts_btn").addEventListener("click", clearAlerts);
+
+// Event delegation: handles Dismiss clicks even after re-render
+document.getElementById("alerts_list").addEventListener("click", (e) => {
+  const btn = e.target.closest(".alert_dismiss_btn");
+  if (!btn) return;
+  dismissAlertById(btn.dataset.id);
+});
+
+refreshAll();
+setInterval(refreshAll, 5000);
 </script>
 </body>
 </html>

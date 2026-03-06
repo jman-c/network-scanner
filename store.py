@@ -18,17 +18,31 @@ class DeviceStore:
     def __init__(self):
         self._lock = Lock()
         self._devices: Dict[str, Device] = {}  # key by MAC
+        self._alerts: List[Dict[str, Any]] = []
+        self._max_alerts = 200
 
     def has(self, mac: str) -> bool:
         mac = mac.lower()
         with self._lock:
             return mac in self._devices
 
-    def get(self, mac: str) -> Optional[Dict[str, Any]]:
-        mac = mac.lower()
+    def add_alert(self, alert: Dict[str, Any]) -> None:
         with self._lock:
-            d = self._devices.get(mac)
-            return None if d is None else asdict(d)
+            self._alerts.insert(0, alert)
+            if len(self._alerts) > self._max_alerts:
+                self._alerts = self._alerts[: self._max_alerts]
+
+    def alerts(self, limit: int = 50) -> List[Dict[str, Any]]:
+        with self._lock:
+            return list(self._alerts[:limit])
+
+    def dismiss_alert(self, alert_id: str) -> None:
+        with self._lock:
+            self._alerts = [a for a in self._alerts if a.get("id") != alert_id]
+
+    def clear_alerts(self) -> None:
+        with self._lock:
+            self._alerts = []
 
     def upsert(
         self,
@@ -54,10 +68,8 @@ class DeviceStore:
 
                 if vendor is not None:
                     d.vendor = vendor
-
                 if hostname is not None and hostname != "":
                     d.hostname = hostname
-
                 if friendly_name is not None and friendly_name != "":
                     d.friendly_name = friendly_name
             else:

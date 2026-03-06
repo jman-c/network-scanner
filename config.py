@@ -4,17 +4,15 @@ SCAN_IFACE = "Realtek USB GbE Family Controller #3"
 
 # Known/allowed devices by MAC (lowercase, colon-separated)
 # Map MAC -> friendly name
-KNOWN_DEVICES = {
-    "aa:bb:cc:dd:ee:ff": "Core Switch",
-    "11:22:33:44:55:66": "NAS",
-}
+KNOWN_DEVICES = {}
 
 # How often to rescan (seconds) when running continuous scans
 SCAN_INTERVAL_SEC = 60
 
-# Vendor lookup: choose "local" (OUI file) or "remote" (API)
-VENDOR_LOOKUP_MODE = "remote"  # "remote" also supported
-
 # If using local OUI file, path to file (download step below)
 LOCAL_OUI_PATH = "oui.txt"
+
+# Monitoring
+ALERT_ON_NEW_DEVICE = True
+ALERT_WEBHOOK_URL = ""  # optional, e.g. Discord/Slack webhook
 

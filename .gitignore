@@ -4,6 +4,7 @@ __pycache__/
 
 # runtime data
 vendor_cache.json
+seen_macs.json
 *.db
 *.sqlite
 

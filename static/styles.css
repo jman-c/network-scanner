@@ -1,17 +1,191 @@
-body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background:#0b0f14; color:#e7eef7; }
-.wrap { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
-h1 { font-size: 22px; margin: 0 0 16px; }
+:root {
+  --bg: #0b1220;
+  --panel: #111926;
+  --border: #1f2a3a;
+  --text: #e8eefc;
+  --muted: rgba(232, 238, 252, 0.75);
+}
 
-.cards { display:flex; gap:12px; margin: 10px 0 18px; }
-.card { background:#111926; border:1px solid #1f2a3a; padding:12px 14px; border-radius:12px; min-width:120px; }
-.card.warn { border-color:#5a2f2f; }
-.label { font-size: 12px; opacity: 0.8; }
-.value { font-size: 22px; margin-top: 4px; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
 
-table { width: 100%; border-collapse: collapse; background:#0f1622; border:1px solid #1f2a3a; border-radius: 12px; overflow:hidden; }
-th, td { padding: 10px 10px; border-bottom: 1px solid #1f2a3a; font-size: 13px; }
-th { text-align:left; font-size: 12px; opacity: 0.9; background:#101a29; }
-tr.unknown { background: rgba(255, 70, 70, 0.10); }
-tr.known { background: rgba(70, 255, 160, 0.06); }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-.hint { opacity: 0.8; margin-top: 10px; font-size: 13px; }
+.wrap {
+  max-width: 1100px;
+  margin: 28px auto;
+  padding: 0 18px;
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0 0 14px;
+  letter-spacing: 0.2px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.card.warn {
+  border-color: rgba(255, 80, 80, 0.35);
+}
+
+.label {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.value {
+  font-size: 24px;
+  margin-top: 6px;
+  font-weight: 700;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+thead th {
+  text-align: left;
+  font-size: 12px;
+  opacity: 0.9;
+  padding: 12px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(31, 42, 58, 0.7);
+  font-size: 13px;
+  vertical-align: top;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr.unknown {
+  background: rgba(255, 80, 80, 0.06);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  color: rgba(232, 238, 252, 0.95);
+}
+
+.hint {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Buttons */
+.btn {
+  background: #0f1a2a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn:hover { filter: brightness(1.08); }
+.btn:active { transform: translateY(1px); }
+
+.btn_small {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+/* Alerts */
+.alerts {
+  margin-top: 8px;
+  margin-bottom: 14px;
+}
+
+.alerts_header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.alerts h2 {
+  font-size: 14px;
+  margin: 0;
+  opacity: 0.9;
+}
+
+.alerts_list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.alert_item {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 12px 14px;
+  border-radius: 14px;
+}
+
+.alert_title_row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.alert_title {
+  font-size: 12px;
+  opacity: 0.92;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.alert_body {
+  font-size: 13px;
+  opacity: 0.95;
+}
+
+.pill {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  opacity: 0.95;
+}
+
+.pill_ok {
+  border-color: rgba(70, 255, 160, 0.35);
+}
+
+.pill_warn {
+  border-color: rgba(255, 80, 80, 0.45);
+}
