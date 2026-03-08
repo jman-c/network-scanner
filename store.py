@@ -93,7 +93,7 @@ class DeviceStore:
 
         with self._lock, get_conn(self.db_path) as conn:
             existing = conn.execute("""
-                SELECT vendor, hostname, friendly_name, first_seen
+                SELECT vendor, hostname, friendly_name
                 FROM devices
                 WHERE mac = ?
             """, (mac,)).fetchone()
@@ -105,7 +105,7 @@ class DeviceStore:
 
                 conn.execute("""
                     UPDATE devices
-                    SET ip = ?, vendor = ?, hostname = ?, friendly_name = ?, last_seen = ?, known = ?
+                    SET ip = ?, vendor = ?, hostname = ?, friendly_name = ?, last_seen = ?, known = ?, status = ?
                     WHERE mac = ?
                 """, (
                     ip,
@@ -114,13 +114,14 @@ class DeviceStore:
                     new_friendly,
                     now,
                     1 if known else 0,
+                    "online",
                     mac,
                 ))
             else:
                 conn.execute("""
                     INSERT INTO devices (
-                        mac, ip, vendor, hostname, friendly_name, first_seen, last_seen, known
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        mac, ip, vendor, hostname, friendly_name, first_seen, last_seen, known, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     mac,
                     ip,
@@ -130,33 +131,67 @@ class DeviceStore:
                     now,
                     now,
                     1 if known else 0,
+                    "online",
                 ))
+
+    def mark_offline_devices(self) -> List[Dict[str, Any]]:
+        now = datetime.utcnow()
+        offline_threshold = config.SCAN_INTERVAL_SEC * 2
+        newly_offline = []
+
+        with self._lock, get_conn(self.db_path) as conn:
+            rows = conn.execute("""
+                SELECT ip, mac, vendor, hostname, friendly_name, known, last_seen, status
+                FROM devices
+            """).fetchall()
+
+            for r in rows:
+                last_seen = r["last_seen"]
+                if not last_seen:
+                    continue
+
+                try:
+                    last = datetime.fromisoformat(last_seen.replace("Z", ""))
+                except Exception:
+                    continue
+
+                delta = (now - last).total_seconds()
+                should_be_offline = delta > offline_threshold
+                current_status = (r["status"] or "unknown").lower()
+
+                if should_be_offline and current_status != "offline":
+                    conn.execute(
+                        "UPDATE devices SET status = ? WHERE mac = ?",
+                        ("offline", r["mac"]),
+                    )
+
+                    newly_offline.append({
+                        "ip": r["ip"],
+                        "mac": r["mac"],
+                        "vendor": r["vendor"],
+                        "hostname": r["hostname"],
+                        "known": bool(r["known"]),
+                        "friendly_name": r["friendly_name"],
+                    })
+
+                elif not should_be_offline and current_status != "online":
+                    conn.execute(
+                        "UPDATE devices SET status = ? WHERE mac = ?",
+                        ("online", r["mac"]),
+                    )
+
+        return newly_offline
 
     def all(self) -> List[Dict[str, Any]]:
         with self._lock, get_conn(self.db_path) as conn:
             rows = conn.execute("""
-                SELECT ip, mac, vendor, hostname, friendly_name, first_seen, last_seen, known
+                SELECT ip, mac, vendor, hostname, friendly_name, first_seen, last_seen, known, status
                 FROM devices
                 ORDER BY last_seen DESC, mac ASC
             """).fetchall()
 
-            devices = []
-            now = datetime.utcnow()
-            offline_threshold = config.SCAN_INTERVAL_SEC * 2
-
-            for r in rows:
-                last_seen = r["last_seen"]
-                status = "unknown"
-
-                if last_seen:
-                    try:
-                        last = datetime.fromisoformat(last_seen.replace("Z", ""))
-                        delta = (now - last).total_seconds()
-                        status = "online" if delta <= offline_threshold else "offline"
-                    except Exception:
-                        status = "unknown"
-
-                devices.append({
+            return [
+                {
                     "ip": r["ip"],
                     "mac": r["mac"],
                     "vendor": r["vendor"],
@@ -165,10 +200,10 @@ class DeviceStore:
                     "first_seen": r["first_seen"],
                     "last_seen": r["last_seen"],
                     "known": bool(r["known"]),
-                    "status": status,
-                })
-
-            return devices
+                    "status": (r["status"] or "unknown").lower(),
+                }
+                for r in rows
+            ]
 
     def summary(self) -> Dict[str, int]:
         with self._lock, get_conn(self.db_path) as conn:

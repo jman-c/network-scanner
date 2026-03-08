@@ -19,7 +19,6 @@ DB_PATH = getattr(config, "DB_PATH", "net_scanner.db")
 init_db(DB_PATH)
 store = DeviceStore(DB_PATH)
 
-# Optional: load local OUI mapping if present (safe if missing)
 LOCAL_OUI_MAP = {}
 try:
     local_path = getattr(config, "LOCAL_OUI_PATH", "oui.txt")
@@ -40,10 +39,19 @@ def is_known(mac: str):
 def make_alert(alert_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     mac = payload.get("mac", "")
-    alert_id = f"{ts}:{mac}"
+    alert_id = f"{alert_type}:{ts}:{mac}"
     out = {"id": alert_id, "type": alert_type, "time": ts}
     out.update(payload)
     return out
+
+
+def send_webhook(alert: Dict[str, Any]) -> None:
+    webhook = getattr(config, "ALERT_WEBHOOK_URL", "").strip()
+    if webhook:
+        try:
+            requests.post(webhook, json=alert, timeout=4)
+        except Exception:
+            pass
 
 
 def scan_loop():
@@ -64,11 +72,9 @@ def scan_loop():
                 is_new_device = not store.has(mac)
 
                 if is_new_device:
-                    # Enrich only NEW devices (fast)
                     hostname = reverse_dns(ip)
                     vendor = vendor_lookup(mac, local_oui_map=LOCAL_OUI_MAP, use_remote=True)
 
-                    # Optional fallback: if no friendly name configured, use hostname
                     if not friendly_name and hostname:
                         friendly_name = hostname
 
@@ -95,16 +101,9 @@ def scan_loop():
                         )
                         store.add_alert(alert)
                         print(f"[ALERT] New device: ip={ip} mac={mac} vendor={vendor} host={hostname} known={known}")
-
-                        webhook = getattr(config, "ALERT_WEBHOOK_URL", "").strip()
-                        if webhook:
-                            try:
-                                requests.post(webhook, json=alert, timeout=4)
-                            except Exception:
-                                pass
+                        send_webhook(alert)
 
                 else:
-                    # Existing device: skip hostname/vendor lookup
                     store.upsert(
                         ip=ip,
                         mac=mac,
@@ -113,6 +112,13 @@ def scan_loop():
                         friendly_name=friendly_name,
                         hostname=None,
                     )
+
+            newly_offline = store.mark_offline_devices()
+            for device in newly_offline:
+                alert = make_alert("offline_device", device)
+                store.add_alert(alert)
+                print(f"[ALERT] Device offline: ip={device['ip']} mac={device['mac']} vendor={device['vendor']}")
+                send_webhook(alert)
 
             backoff = config.SCAN_INTERVAL_SEC
 

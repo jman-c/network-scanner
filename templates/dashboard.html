@@ -126,7 +126,10 @@ async function refreshAlerts() {
   }
 
   el.innerHTML = alerts.slice(0, 10).map(a => {
-    const title = (a.type === "new_device") ? "NEW DEVICE" : (a.type || "ALERT");
+    const title =
+      a.type === "new_device" ? "NEW DEVICE" :
+      a.type === "offline_device" ? "DEVICE OFFLINE" :
+      (a.type || "ALERT");
     const name = a.friendly_name || a.hostname || "";
     const known = a.known ? "KNOWN" : "UNKNOWN";
 

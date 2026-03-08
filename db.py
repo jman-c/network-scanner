@@ -16,9 +16,11 @@ def init_db(db_path: str = DB_PATH) -> None:
                 friendly_name TEXT,
                 first_seen TEXT NOT NULL,
                 last_seen TEXT NOT NULL,
-                known INTEGER NOT NULL DEFAULT 0
+                known INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'unknown'
             )
         """)
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS alerts (
                 id TEXT PRIMARY KEY,
@@ -32,6 +34,7 @@ def init_db(db_path: str = DB_PATH) -> None:
                 friendly_name TEXT
             )
         """)
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS vendor_cache (
                 oui_prefix TEXT PRIMARY KEY,
@@ -39,6 +42,12 @@ def init_db(db_path: str = DB_PATH) -> None:
                 updated_at TEXT NOT NULL
             )
         """)
+
+        # Simple migration for older DBs created before status existed
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()]
+        if "status" not in cols:
+            conn.execute("ALTER TABLE devices ADD COLUMN status TEXT NOT NULL DEFAULT 'unknown'")
+
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_time ON alerts(time DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen DESC)")
         conn.commit()

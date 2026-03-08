@@ -7,7 +7,7 @@ SCAN_IFACE = "Realtek USB GbE Family Controller #3"
 KNOWN_DEVICES = {}
 
 # How often to rescan (seconds) when running continuous scans
-SCAN_INTERVAL_SEC = 60
+SCAN_INTERVAL_SEC = 30
 
 # If using local OUI file, path to file (download step below)
 LOCAL_OUI_PATH = "oui.txt"
