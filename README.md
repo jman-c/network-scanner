@@ -1,5 +1,12 @@
 # Network Device Scanner
 
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Status](https://img.shields.io/badge/status-active-success)
+![Scapy](https://img.shields.io/badge/network-scapy-orange)
+![Flask](https://img.shields.io/badge/backend-flask-black)
+
 A lightweight network discovery and monitoring tool built with **Python, Scapy, Flask, and SQLite**.
 
 The scanner discovers devices on a local network, identifies them using **MAC address vendor lookup**, resolves **hostnames**, and presents the results on a **live web dashboard**.
