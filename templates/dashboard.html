@@ -36,6 +36,7 @@
       <thead>
         <tr>
           <th>Status</th>
+          <th>Uptime</th>
           <th>Friendly Name</th>
           <th>Hostname</th>
           <th>IP</th>
@@ -77,6 +78,13 @@ function renderDeviceStatus(d) {
   return '<span class="pill">UNKNOWN</span>';
 }
 
+function renderUptime(d) {
+  if ((d.status || "").toLowerCase() !== "online") {
+    return "";
+  }
+  return escapeHtml(d.uptime || "");
+}
+
 async function refreshDevices() {
   const res = await fetch("/api/devices");
   const data = await res.json();
@@ -101,6 +109,7 @@ async function refreshDevices() {
 
       tr.innerHTML = `
         <td>${renderDeviceStatus(d)}</td>
+        <td>${renderUptime(d)}</td>
         <td>${escapeHtml(d.friendly_name || "")}</td>
         <td>${escapeHtml(d.hostname || "")}</td>
         <td>${escapeHtml(d.ip || "")}</td>
@@ -130,6 +139,7 @@ async function refreshAlerts() {
       a.type === "new_device" ? "NEW DEVICE" :
       a.type === "offline_device" ? "DEVICE OFFLINE" :
       (a.type || "ALERT");
+
     const name = a.friendly_name || a.hostname || "";
     const known = a.known ? "KNOWN" : "UNKNOWN";
 

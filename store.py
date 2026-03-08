@@ -6,6 +6,29 @@ import config
 from db import get_conn
 
 
+def _parse_utc(ts: Optional[str]) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", ""))
+    except Exception:
+        return None
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, _ = divmod(rem, 60)
+
+    if days > 0:
+        return f"{days}d {hours}h"
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
 class DeviceStore:
     def __init__(self, db_path: str = "net_scanner.db"):
         self._lock = Lock()
@@ -93,7 +116,7 @@ class DeviceStore:
 
         with self._lock, get_conn(self.db_path) as conn:
             existing = conn.execute("""
-                SELECT vendor, hostname, friendly_name
+                SELECT vendor, hostname, friendly_name, status, online_since
                 FROM devices
                 WHERE mac = ?
             """, (mac,)).fetchone()
@@ -103,9 +126,15 @@ class DeviceStore:
                 new_hostname = hostname if hostname not in (None, "") else existing["hostname"]
                 new_friendly = friendly_name if friendly_name not in (None, "") else existing["friendly_name"]
 
+                previous_status = (existing["status"] or "unknown").lower()
+                if previous_status == "online" and existing["online_since"]:
+                    online_since = existing["online_since"]
+                else:
+                    online_since = now
+
                 conn.execute("""
                     UPDATE devices
-                    SET ip = ?, vendor = ?, hostname = ?, friendly_name = ?, last_seen = ?, known = ?, status = ?
+                    SET ip = ?, vendor = ?, hostname = ?, friendly_name = ?, last_seen = ?, known = ?, status = ?, online_since = ?
                     WHERE mac = ?
                 """, (
                     ip,
@@ -115,13 +144,14 @@ class DeviceStore:
                     now,
                     1 if known else 0,
                     "online",
+                    online_since,
                     mac,
                 ))
             else:
                 conn.execute("""
                     INSERT INTO devices (
-                        mac, ip, vendor, hostname, friendly_name, first_seen, last_seen, known, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        mac, ip, vendor, hostname, friendly_name, first_seen, last_seen, known, status, online_since
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     mac,
                     ip,
@@ -132,6 +162,7 @@ class DeviceStore:
                     now,
                     1 if known else 0,
                     "online",
+                    now,
                 ))
 
     def mark_offline_devices(self) -> List[Dict[str, Any]]:
@@ -141,18 +172,14 @@ class DeviceStore:
 
         with self._lock, get_conn(self.db_path) as conn:
             rows = conn.execute("""
-                SELECT ip, mac, vendor, hostname, friendly_name, known, last_seen, status
+                SELECT ip, mac, vendor, hostname, friendly_name, known, last_seen, status, online_since
                 FROM devices
             """).fetchall()
 
             for r in rows:
                 last_seen = r["last_seen"]
-                if not last_seen:
-                    continue
-
-                try:
-                    last = datetime.fromisoformat(last_seen.replace("Z", ""))
-                except Exception:
+                last = _parse_utc(last_seen)
+                if not last:
                     continue
 
                 delta = (now - last).total_seconds()
@@ -175,9 +202,10 @@ class DeviceStore:
                     })
 
                 elif not should_be_offline and current_status != "online":
+                    restored_online_since = r["online_since"] or r["last_seen"] or now.isoformat(timespec="seconds") + "Z"
                     conn.execute(
-                        "UPDATE devices SET status = ? WHERE mac = ?",
-                        ("online", r["mac"]),
+                        "UPDATE devices SET status = ?, online_since = ? WHERE mac = ?",
+                        ("online", restored_online_since, r["mac"]),
                     )
 
         return newly_offline
@@ -185,13 +213,25 @@ class DeviceStore:
     def all(self) -> List[Dict[str, Any]]:
         with self._lock, get_conn(self.db_path) as conn:
             rows = conn.execute("""
-                SELECT ip, mac, vendor, hostname, friendly_name, first_seen, last_seen, known, status
+                SELECT ip, mac, vendor, hostname, friendly_name, first_seen, last_seen, known, status, online_since
                 FROM devices
                 ORDER BY last_seen DESC, mac ASC
             """).fetchall()
 
-            return [
-                {
+            now = datetime.utcnow()
+            devices = []
+
+            for r in rows:
+                status = (r["status"] or "unknown").lower()
+                online_since = r["online_since"]
+                uptime = ""
+
+                if status == "online":
+                    start = _parse_utc(online_since)
+                    if start:
+                        uptime = _format_duration((now - start).total_seconds())
+
+                devices.append({
                     "ip": r["ip"],
                     "mac": r["mac"],
                     "vendor": r["vendor"],
@@ -200,10 +240,12 @@ class DeviceStore:
                     "first_seen": r["first_seen"],
                     "last_seen": r["last_seen"],
                     "known": bool(r["known"]),
-                    "status": (r["status"] or "unknown").lower(),
-                }
-                for r in rows
-            ]
+                    "status": status,
+                    "online_since": online_since,
+                    "uptime": uptime,
+                })
+
+            return devices
 
     def summary(self) -> Dict[str, int]:
         with self._lock, get_conn(self.db_path) as conn:

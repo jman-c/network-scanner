@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.pyc
+.idea/
 
 # runtime data
 *.db

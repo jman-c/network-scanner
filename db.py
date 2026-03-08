@@ -17,7 +17,8 @@ def init_db(db_path: str = DB_PATH) -> None:
                 first_seen TEXT NOT NULL,
                 last_seen TEXT NOT NULL,
                 known INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL DEFAULT 'unknown'
+                status TEXT NOT NULL DEFAULT 'unknown',
+                online_since TEXT
             )
         """)
 
@@ -43,10 +44,13 @@ def init_db(db_path: str = DB_PATH) -> None:
             )
         """)
 
-        # Simple migration for older DBs created before status existed
         cols = [row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()]
+
         if "status" not in cols:
             conn.execute("ALTER TABLE devices ADD COLUMN status TEXT NOT NULL DEFAULT 'unknown'")
+
+        if "online_since" not in cols:
+            conn.execute("ALTER TABLE devices ADD COLUMN online_since TEXT")
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_time ON alerts(time DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen DESC)")
