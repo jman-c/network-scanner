@@ -2,6 +2,7 @@ from datetime import datetime
 from threading import Lock
 from typing import Optional, List, Dict, Any
 
+import config
 from db import get_conn
 
 
@@ -139,8 +140,23 @@ class DeviceStore:
                 ORDER BY last_seen DESC, mac ASC
             """).fetchall()
 
-            return [
-                {
+            devices = []
+            now = datetime.utcnow()
+            offline_threshold = config.SCAN_INTERVAL_SEC * 2
+
+            for r in rows:
+                last_seen = r["last_seen"]
+                status = "unknown"
+
+                if last_seen:
+                    try:
+                        last = datetime.fromisoformat(last_seen.replace("Z", ""))
+                        delta = (now - last).total_seconds()
+                        status = "online" if delta <= offline_threshold else "offline"
+                    except Exception:
+                        status = "unknown"
+
+                devices.append({
                     "ip": r["ip"],
                     "mac": r["mac"],
                     "vendor": r["vendor"],
@@ -149,9 +165,10 @@ class DeviceStore:
                     "first_seen": r["first_seen"],
                     "last_seen": r["last_seen"],
                     "known": bool(r["known"]),
-                }
-                for r in rows
-            ]
+                    "status": status,
+                })
+
+            return devices
 
     def summary(self) -> Dict[str, int]:
         with self._lock, get_conn(self.db_path) as conn:

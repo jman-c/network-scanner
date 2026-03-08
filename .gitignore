@@ -3,8 +3,6 @@ __pycache__/
 *.pyc
 
 # runtime data
-vendor_cache.json
-seen_macs.json
 *.db
 *.sqlite
 

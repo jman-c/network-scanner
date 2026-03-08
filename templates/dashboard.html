@@ -54,6 +54,29 @@
   </div>
 
 <script>
+function escapeHtml(value) {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function renderDeviceStatus(d) {
+  const status = (d.status || "").toLowerCase();
+
+  if (status === "online") {
+    return '<span class="pill pill_ok">ONLINE</span>';
+  }
+  if (status === "offline") {
+    return '<span class="pill pill_warn">OFFLINE</span>';
+  }
+
+  return '<span class="pill">UNKNOWN</span>';
+}
+
 async function refreshDevices() {
   const res = await fetch("/api/devices");
   const data = await res.json();
@@ -66,20 +89,25 @@ async function refreshDevices() {
   tbody.innerHTML = "";
 
   (data.devices || [])
-    .sort((a,b) => (a.known === b.known) ? a.mac.localeCompare(b.mac) : (a.known ? 1 : -1))
+    .sort((a, b) => {
+      if (a.known === b.known) {
+        return a.mac.localeCompare(b.mac);
+      }
+      return a.known ? 1 : -1;
+    })
     .forEach(d => {
       const tr = document.createElement("tr");
       tr.className = d.known ? "known" : "unknown";
 
       tr.innerHTML = `
-        <td>${d.known ? "KNOWN" : "UNKNOWN"}</td>
-        <td>${d.friendly_name || ""}</td>
-        <td>${d.hostname || ""}</td>
-        <td>${d.ip}</td>
-        <td><code>${d.mac}</code></td>
-        <td>${d.vendor}</td>
-        <td><code>${d.first_seen}</code></td>
-        <td><code>${d.last_seen}</code></td>
+        <td>${renderDeviceStatus(d)}</td>
+        <td>${escapeHtml(d.friendly_name || "")}</td>
+        <td>${escapeHtml(d.hostname || "")}</td>
+        <td>${escapeHtml(d.ip || "")}</td>
+        <td><code>${escapeHtml(d.mac || "")}</code></td>
+        <td>${escapeHtml(d.vendor || "")}</td>
+        <td><code>${escapeHtml(d.first_seen || "")}</code></td>
+        <td><code>${escapeHtml(d.last_seen || "")}</code></td>
       `;
       tbody.appendChild(tr);
     });
@@ -102,23 +130,22 @@ async function refreshAlerts() {
     const name = a.friendly_name || a.hostname || "";
     const known = a.known ? "KNOWN" : "UNKNOWN";
 
-    // IMPORTANT: store the raw alert id in data-id (no inline onclick)
     return `
       <div class="alert_item">
         <div class="alert_title_row">
           <div class="alert_title">
-            ${title}
-            <span class="pill ${a.known ? "pill_ok" : "pill_warn"}">${known}</span>
+            ${escapeHtml(title)}
+            <span class="pill ${a.known ? "pill_ok" : "pill_warn"}">${escapeHtml(known)}</span>
           </div>
           <button class="btn btn_small alert_dismiss_btn" type="button"
-                  data-id="${a.id || ""}">
+                  data-id="${escapeHtml(a.id || "")}">
             Dismiss
           </button>
         </div>
         <div class="alert_body">
-          <div><b>Time:</b> <code>${a.time || ""}</code></div>
-          <div><b>IP:</b> ${a.ip || ""} &nbsp; <b>MAC:</b> <code>${a.mac || ""}</code></div>
-          <div><b>Vendor:</b> ${a.vendor || ""} &nbsp; <b>Name:</b> ${name}</div>
+          <div><b>Time:</b> <code>${escapeHtml(a.time || "")}</code></div>
+          <div><b>IP:</b> ${escapeHtml(a.ip || "")} &nbsp; <b>MAC:</b> <code>${escapeHtml(a.mac || "")}</code></div>
+          <div><b>Vendor:</b> ${escapeHtml(a.vendor || "")} &nbsp; <b>Name:</b> ${escapeHtml(name)}</div>
         </div>
       </div>
     `;
@@ -128,12 +155,9 @@ async function refreshAlerts() {
 async function dismissAlertById(id) {
   if (!id) return;
 
-  // encode for URL path safety (colons etc.)
   const url = `/api/alerts/${encodeURIComponent(id)}`;
-
   const res = await fetch(url, { method: "DELETE" });
 
-  // If something goes wrong, you'll actually see it now:
   if (!res.ok) {
     const txt = await res.text();
     console.error("Dismiss failed:", res.status, txt);
@@ -157,7 +181,6 @@ async function refreshAll() {
 
 document.getElementById("clear_alerts_btn").addEventListener("click", clearAlerts);
 
-// Event delegation: handles Dismiss clicks even after re-render
 document.getElementById("alerts_list").addEventListener("click", (e) => {
   const btn = e.target.closest(".alert_dismiss_btn");
   if (!btn) return;
