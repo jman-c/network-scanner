@@ -102,6 +102,52 @@ class DeviceStore:
         with self._lock, get_conn(self.db_path) as conn:
             conn.execute("DELETE FROM alerts")
 
+    def add_event(self, event_type: str, payload: Dict[str, Any]) -> None:
+        ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+        with self._lock, get_conn(self.db_path) as conn:
+            conn.execute("""
+                INSERT INTO device_events (
+                    mac, event_type, event_time, ip, vendor, hostname, known, friendly_name
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                (payload.get("mac") or "").lower(),
+                event_type,
+                ts,
+                payload.get("ip"),
+                payload.get("vendor"),
+                payload.get("hostname"),
+                1 if payload.get("known") else 0,
+                payload.get("friendly_name"),
+            ))
+
+    def get_device_events(self, mac: str, limit: int = 50) -> List[Dict[str, Any]]:
+        mac = mac.lower()
+
+        with self._lock, get_conn(self.db_path) as conn:
+            rows = conn.execute("""
+                SELECT id, mac, event_type, event_time, ip, vendor, hostname, known, friendly_name
+                FROM device_events
+                WHERE mac = ?
+                ORDER BY event_time DESC, id DESC
+                LIMIT ?
+            """, (mac, limit)).fetchall()
+
+            return [
+                {
+                    "id": r["id"],
+                    "mac": r["mac"],
+                    "event_type": r["event_type"],
+                    "event_time": r["event_time"],
+                    "ip": r["ip"],
+                    "vendor": r["vendor"],
+                    "hostname": r["hostname"],
+                    "known": bool(r["known"]),
+                    "friendly_name": r["friendly_name"],
+                }
+                for r in rows
+            ]
+
     def upsert(
         self,
         ip: str,
@@ -113,6 +159,7 @@ class DeviceStore:
     ) -> None:
         now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
         mac = mac.lower()
+        event_to_add: Optional[Dict[str, Any]] = None
 
         with self._lock, get_conn(self.db_path) as conn:
             existing = conn.execute("""
@@ -147,6 +194,18 @@ class DeviceStore:
                     online_since,
                     mac,
                 ))
+
+                if previous_status == "offline":
+                    event_to_add = {
+                        "mac": mac,
+                        "ip": ip,
+                        "vendor": new_vendor or "Unknown",
+                        "hostname": new_hostname,
+                        "known": known,
+                        "friendly_name": new_friendly,
+                        "event_type": "device_online",
+                    }
+
             else:
                 conn.execute("""
                     INSERT INTO devices (
@@ -165,10 +224,24 @@ class DeviceStore:
                     now,
                 ))
 
+                event_to_add = {
+                    "mac": mac,
+                    "ip": ip,
+                    "vendor": vendor or "Unknown",
+                    "hostname": hostname,
+                    "known": known,
+                    "friendly_name": friendly_name,
+                    "event_type": "new_device",
+                }
+
+        if event_to_add:
+            self.add_event(event_to_add["event_type"], event_to_add)
+
     def mark_offline_devices(self) -> List[Dict[str, Any]]:
         now = datetime.utcnow()
         offline_threshold = config.SCAN_INTERVAL_SEC * 2
         newly_offline = []
+        events_to_add: List[Dict[str, Any]] = []
 
         with self._lock, get_conn(self.db_path) as conn:
             rows = conn.execute("""
@@ -177,8 +250,7 @@ class DeviceStore:
             """).fetchall()
 
             for r in rows:
-                last_seen = r["last_seen"]
-                last = _parse_utc(last_seen)
+                last = _parse_utc(r["last_seen"])
                 if not last:
                     continue
 
@@ -192,21 +264,30 @@ class DeviceStore:
                         ("offline", r["mac"]),
                     )
 
-                    newly_offline.append({
+                    payload = {
                         "ip": r["ip"],
                         "mac": r["mac"],
                         "vendor": r["vendor"],
                         "hostname": r["hostname"],
                         "known": bool(r["known"]),
                         "friendly_name": r["friendly_name"],
+                    }
+
+                    newly_offline.append(payload)
+                    events_to_add.append({
+                        **payload,
+                        "event_type": "device_offline",
                     })
 
                 elif not should_be_offline and current_status != "online":
-                    restored_online_since = r["online_since"] or r["last_seen"] or now.isoformat(timespec="seconds") + "Z"
+                    restored_online_since = now.isoformat(timespec="seconds") + "Z"
                     conn.execute(
                         "UPDATE devices SET status = ?, online_since = ? WHERE mac = ?",
                         ("online", restored_online_since, r["mac"]),
                     )
+
+        for event in events_to_add:
+            self.add_event(event["event_type"], event)
 
         return newly_offline
 

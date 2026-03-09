@@ -44,6 +44,20 @@ def init_db(db_path: str = DB_PATH) -> None:
             )
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS device_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mac TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                event_time TEXT NOT NULL,
+                ip TEXT,
+                vendor TEXT,
+                hostname TEXT,
+                known INTEGER,
+                friendly_name TEXT
+            )
+        """)
+
         cols = [row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()]
 
         if "status" not in cols:
@@ -54,6 +68,8 @@ def init_db(db_path: str = DB_PATH) -> None:
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_time ON alerts(time DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_device_events_mac_time ON device_events(mac, event_time DESC)")
+
         conn.commit()
     finally:
         conn.close()
