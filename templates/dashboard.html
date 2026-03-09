@@ -7,7 +7,22 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Network Device Scanner</h1>
+    <div class="topbar">
+      <div>
+        <h1>Network Device Scanner</h1>
+        <p class="subtitle">Live network discovery and monitoring</p>
+      </div>
+
+      <div class="topbar_actions">
+        <button id="alerts_bell_btn" class="bell_btn" type="button" aria-label="Open alerts">
+          <svg class="bell_icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8a6 6 0 10-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path>
+            <path d="M13.73 21a2 2 0 01-3.46 0"></path>
+          </svg>
+          <span id="alerts_badge" class="alerts_badge hidden">0</span>
+        </button>
+      </div>
+    </div>
 
     <div class="cards">
       <div class="card">
@@ -24,37 +39,71 @@
       </div>
     </div>
 
-    <div class="alerts">
-      <div class="alerts_header">
-        <h2>Alerts</h2>
-        <button class="btn" id="clear_alerts_btn" type="button">Clear All</button>
-      </div>
-      <div id="alerts_list" class="alerts_list">No alerts yet.</div>
+    <div class="table_panel">
+      <table id="tbl">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>History</th>
+            <th>Uptime</th>
+            <th>Hostname</th>
+            <th>IP</th>
+            <th>MAC</th>
+            <th>Vendor</th>
+            <th>First Seen</th>
+            <th>Last Seen</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <p class="hint">
+        Click <b>History</b> to open a device timeline. Unknown devices are highlighted.
+      </p>
     </div>
+  </div>
 
-    <table id="tbl">
-      <thead>
-        <tr>
-          <th>Status</th>
-          <th>Uptime</th>
-          <th>Friendly Name</th>
-          <th>Hostname</th>
-          <th>IP</th>
-          <th>MAC</th>
-          <th>Vendor</th>
-          <th>First Seen</th>
-          <th>Last Seen</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+  <!-- Device History Modal -->
+  <div id="history_modal" class="modal_overlay hidden">
+    <div class="modal">
+      <div class="modal_header">
+        <div>
+          <h2>Device History</h2>
+          <p class="modal_subtitle">Recent timeline for the selected device</p>
+        </div>
+        <button class="btn btn_close" id="close_history_btn" type="button">Close</button>
+      </div>
 
-    <p class="hint">
-      Unknown devices are highlighted. Update <code>config.KNOWN_DEVICES</code> to mark trusted MACs.
-    </p>
+      <div class="modal_meta">
+        <div><b>Hostname:</b> <span id="history_hostname"></span></div>
+        <div><b>MAC:</b> <code id="history_mac"></code></div>
+        <div><b>IP:</b> <span id="history_ip"></span></div>
+        <div><b>Vendor:</b> <span id="history_vendor"></span></div>
+        <div><b>Status:</b> <span id="history_status"></span></div>
+        <div><b>Uptime:</b> <span id="history_uptime"></span></div>
+      </div>
+
+      <div id="timeline_list" class="timeline_list"></div>
+    </div>
+  </div>
+
+  <!-- Alerts Modal -->
+  <div id="alerts_modal" class="alerts_overlay hidden">
+    <div class="alerts_popup">
+      <div class="alerts_popup_header">
+        <h2>Alerts</h2>
+        <button class="btn btn_text" id="clear_alerts_btn" type="button">Clear All</button>
+      </div>
+
+      <div id="alerts_popup_list" class="alerts_popup_list">
+        <div class="alerts_empty">No alerts yet.</div>
+      </div>
+    </div>
   </div>
 
 <script>
+let previousAlertCount = 0;
+
 function escapeHtml(value) {
   if (value === null || value === undefined) return "";
   return String(value)
@@ -63,6 +112,63 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function parseUtcTimestamp(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function formatTimestampCompact(value) {
+  const d = parseUtcTimestamp(value);
+  if (!d) return value || "";
+
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+
+  const sameYear = d.getFullYear() === now.getFullYear();
+
+  if (sameDay) {
+    return d.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  if (sameYear) {
+    return d.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function formatTimestampDetailed(value) {
+  const d = parseUtcTimestamp(value);
+  if (!d) return value || "";
+
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
 }
 
 function renderDeviceStatus(d) {
@@ -83,6 +189,55 @@ function renderUptime(d) {
     return "";
   }
   return escapeHtml(d.uptime || "");
+}
+
+function prettyEventType(eventType) {
+  const t = (eventType || "").toLowerCase();
+
+  if (t === "new_device") return "New device detected";
+  if (t === "device_online") return "Device came online";
+  if (t === "device_offline") return "Device went offline";
+
+  return eventType || "Event";
+}
+
+function eventClass(eventType) {
+  const t = (eventType || "").toLowerCase();
+
+  if (t === "new_device") return "timeline_new";
+  if (t === "device_online") return "timeline_online";
+  if (t === "device_offline") return "timeline_offline";
+
+  return "";
+}
+
+function prettyAlertTitle(alertType) {
+  const t = (alertType || "").toLowerCase();
+
+  if (t === "new_device") return "NEW DEVICE";
+  if (t === "offline_device") return "DEVICE OFFLINE";
+
+  return (alertType || "ALERT").replaceAll("_", " ").toUpperCase();
+}
+
+function formatBadgeCount(count) {
+  return count > 9 ? "9+" : String(count);
+}
+
+function openAlertsModal() {
+  document.getElementById("alerts_modal").classList.remove("hidden");
+}
+
+function closeAlertsModal() {
+  document.getElementById("alerts_modal").classList.add("hidden");
+}
+
+function openHistoryModalShell() {
+  document.getElementById("history_modal").classList.remove("hidden");
+}
+
+function closeHistoryModal() {
+  document.getElementById("history_modal").classList.add("hidden");
 }
 
 async function refreshDevices() {
@@ -109,60 +264,137 @@ async function refreshDevices() {
 
       tr.innerHTML = `
         <td>${renderDeviceStatus(d)}</td>
+        <td>
+          <button class="btn btn_small history_btn" type="button">History</button>
+        </td>
         <td>${renderUptime(d)}</td>
-        <td>${escapeHtml(d.friendly_name || "")}</td>
         <td>${escapeHtml(d.hostname || "")}</td>
         <td>${escapeHtml(d.ip || "")}</td>
         <td><code>${escapeHtml(d.mac || "")}</code></td>
         <td>${escapeHtml(d.vendor || "")}</td>
-        <td><code>${escapeHtml(d.first_seen || "")}</code></td>
-        <td><code>${escapeHtml(d.last_seen || "")}</code></td>
+        <td title="${escapeHtml(d.first_seen || "")}">${escapeHtml(formatTimestampCompact(d.first_seen || ""))}</td>
+        <td title="${escapeHtml(d.last_seen || "")}">${escapeHtml(formatTimestampCompact(d.last_seen || ""))}</td>
       `;
+
+      tr.querySelector(".history_btn").addEventListener("click", () => {
+        openHistoryModal(d);
+      });
+
       tbody.appendChild(tr);
     });
 }
 
-async function refreshAlerts() {
-  const res = await fetch("/api/alerts");
-  const data = await res.json();
+async function openHistoryModal(device) {
+  document.getElementById("history_hostname").textContent = device.hostname || "";
+  document.getElementById("history_mac").textContent = device.mac || "";
+  document.getElementById("history_ip").textContent = device.ip || "";
+  document.getElementById("history_vendor").textContent = device.vendor || "";
+  document.getElementById("history_status").textContent = (device.status || "unknown").toUpperCase();
+  document.getElementById("history_uptime").textContent = device.uptime || "";
 
-  const el = document.getElementById("alerts_list");
-  const alerts = data.alerts || [];
+  const timeline = document.getElementById("timeline_list");
+  timeline.innerHTML = `<div class="timeline_empty">Loading history...</div>`;
 
-  if (alerts.length === 0) {
-    el.textContent = "No alerts yet.";
-    return;
-  }
+  openHistoryModalShell();
 
-  el.innerHTML = alerts.slice(0, 10).map(a => {
-    const title =
-      a.type === "new_device" ? "NEW DEVICE" :
-      a.type === "offline_device" ? "DEVICE OFFLINE" :
-      (a.type || "ALERT");
+  try {
+    const res = await fetch(`/api/devices/${encodeURIComponent(device.mac)}/events`);
+    const data = await res.json();
+    const events = data.events || [];
 
-    const name = a.friendly_name || a.hostname || "";
-    const known = a.known ? "KNOWN" : "UNKNOWN";
+    if (events.length === 0) {
+      timeline.innerHTML = `<div class="timeline_empty">No history yet.</div>`;
+      return;
+    }
 
-    return `
-      <div class="alert_item">
-        <div class="alert_title_row">
-          <div class="alert_title">
-            ${escapeHtml(title)}
-            <span class="pill ${a.known ? "pill_ok" : "pill_warn"}">${escapeHtml(known)}</span>
-          </div>
-          <button class="btn btn_small alert_dismiss_btn" type="button"
-                  data-id="${escapeHtml(a.id || "")}">
-            Dismiss
-          </button>
+    timeline.innerHTML = events.map(ev => `
+      <div class="timeline_item ${eventClass(ev.event_type)}">
+        <div class="timeline_time">
+          <code title="${escapeHtml(ev.event_time || "")}">${escapeHtml(formatTimestampDetailed(ev.event_time || ""))}</code>
         </div>
-        <div class="alert_body">
-          <div><b>Time:</b> <code>${escapeHtml(a.time || "")}</code></div>
-          <div><b>IP:</b> ${escapeHtml(a.ip || "")} &nbsp; <b>MAC:</b> <code>${escapeHtml(a.mac || "")}</code></div>
-          <div><b>Vendor:</b> ${escapeHtml(a.vendor || "")} &nbsp; <b>Name:</b> ${escapeHtml(name)}</div>
+        <div class="timeline_body">
+          <div class="timeline_event">${escapeHtml(prettyEventType(ev.event_type))}</div>
+          <div class="timeline_meta">
+            <span><b>IP:</b> ${escapeHtml(ev.ip || "")}</span>
+            <span><b>Vendor:</b> ${escapeHtml(ev.vendor || "")}</span>
+            <span><b>Name:</b> ${escapeHtml(ev.friendly_name || ev.hostname || "")}</span>
+          </div>
         </div>
       </div>
-    `;
-  }).join("");
+    `).join("");
+  } catch (err) {
+    console.error("Failed to load history:", err);
+    timeline.innerHTML = `<div class="timeline_empty">Failed to load history.</div>`;
+  }
+}
+
+async function refreshAlerts() {
+  try {
+    const res = await fetch("/api/alerts");
+    const data = await res.json();
+
+    const alerts = data.alerts || [];
+    const badge = document.getElementById("alerts_badge");
+    const bell = document.getElementById("alerts_bell_btn");
+    const list = document.getElementById("alerts_popup_list");
+
+    if (alerts.length > 0) {
+      badge.textContent = formatBadgeCount(alerts.length);
+      badge.classList.remove("hidden");
+      bell.classList.add("has_alerts");
+
+      if (alerts.length > previousAlertCount) {
+        bell.classList.remove("pulse");
+        void bell.offsetWidth;
+        bell.classList.add("pulse");
+
+        setTimeout(() => {
+          bell.classList.remove("pulse");
+        }, 500);
+      }
+    } else {
+      badge.textContent = "0";
+      badge.classList.add("hidden");
+      bell.classList.remove("has_alerts");
+      bell.classList.remove("pulse");
+    }
+
+    previousAlertCount = alerts.length;
+
+    if (alerts.length === 0) {
+      list.innerHTML = `<div class="alerts_empty">No alerts yet.</div>`;
+      return;
+    }
+
+    list.innerHTML = alerts.slice(0, 50).map(a => {
+      const name = a.friendly_name || a.hostname || "";
+      const known = a.known ? "KNOWN" : "UNKNOWN";
+
+      return `
+        <div class="alert_popup_item">
+          <div class="alert_popup_main">
+            <div class="alert_popup_title_row">
+              <div class="alert_popup_title">
+                ${escapeHtml(prettyAlertTitle(a.type))}
+                <span class="pill ${a.known ? "pill_ok" : "pill_warn"}">${escapeHtml(known)}</span>
+              </div>
+              <button class="icon_btn alert_dismiss_btn" type="button" data-id="${escapeHtml(a.id || "")}" aria-label="Dismiss alert">✕</button>
+            </div>
+
+            <div class="alert_popup_body">
+              <div><b>Time:</b> <code title="${escapeHtml(a.time || "")}">${escapeHtml(formatTimestampDetailed(a.time || ""))}</code></div>
+              <div><b>IP:</b> ${escapeHtml(a.ip || "")}</div>
+              <div><b>MAC:</b> <code>${escapeHtml(a.mac || "")}</code></div>
+              <div><b>Vendor:</b> ${escapeHtml(a.vendor || "")}</div>
+              <div><b>Name:</b> ${escapeHtml(name)}</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
+  } catch (err) {
+    console.error("Failed to load alerts:", err);
+  }
 }
 
 async function dismissAlertById(id) {
@@ -192,12 +424,33 @@ async function refreshAll() {
   await Promise.all([refreshDevices(), refreshAlerts()]);
 }
 
+document.getElementById("alerts_bell_btn").addEventListener("click", openAlertsModal);
 document.getElementById("clear_alerts_btn").addEventListener("click", clearAlerts);
+document.getElementById("close_history_btn").addEventListener("click", closeHistoryModal);
 
-document.getElementById("alerts_list").addEventListener("click", (e) => {
+document.getElementById("history_modal").addEventListener("click", (e) => {
+  if (e.target.id === "history_modal") {
+    closeHistoryModal();
+  }
+});
+
+document.getElementById("alerts_modal").addEventListener("click", (e) => {
+  if (e.target.id === "alerts_modal") {
+    closeAlertsModal();
+  }
+});
+
+document.getElementById("alerts_popup_list").addEventListener("click", (e) => {
   const btn = e.target.closest(".alert_dismiss_btn");
   if (!btn) return;
   dismissAlertById(btn.dataset.id);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeHistoryModal();
+    closeAlertsModal();
+  }
 });
 
 refreshAll();
