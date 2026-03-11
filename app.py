@@ -145,6 +145,15 @@ def api_device_events(mac: str):
     return jsonify({"mac": mac.lower(), "events": store.get_device_events(mac, limit=50)})
 
 
+@app.route("/api/devices/<path:mac>/sessions")
+def api_device_sessions(mac: str):
+    return jsonify({
+        "mac": mac.lower(),
+        "stats": store.get_device_session_stats(mac),
+        "sessions": store.get_device_sessions(mac, limit=50),
+    })
+
+
 @app.route("/api/alerts")
 def api_alerts():
     return jsonify({"alerts": store.alerts(50)})
