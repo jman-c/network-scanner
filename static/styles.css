@@ -307,7 +307,42 @@ code {
     color: #d7deea;
 }
 
-.timeline_list {
+.history_tabs {
+    display: flex;
+    gap: 10px;
+    padding: 14px 20px 0;
+    border-bottom: 1px solid #252b36;
+}
+
+.tab_btn {
+    background: transparent;
+    color: #a7b1c2;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 2px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 14px;
+}
+
+.tab_btn:hover {
+    color: #ffffff;
+}
+
+.tab_btn.active {
+    color: #ffffff;
+    border-bottom-color: #2a6df4;
+}
+
+.history_tab {
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.timeline_list,
+.sessions_list {
     padding: 16px 20px 20px;
     overflow-y: auto;
     display: flex;
@@ -356,6 +391,81 @@ code {
     gap: 4px;
     color: #c7d0dc;
     font-size: 13px;
+}
+
+/* Session tab */
+.sessions_stats {
+    padding: 16px 20px 0;
+}
+
+.session_stats_grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+}
+
+.session_stat_card {
+    background: #11141a;
+    border: 1px solid #2b313d;
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.session_stat_label {
+    color: #a7b1c2;
+    font-size: 12px;
+    margin-bottom: 6px;
+}
+
+.session_stat_value {
+    font-size: 18px;
+    font-weight: 700;
+    color: #e8ecf1;
+}
+
+.session_item {
+    border: 1px solid #2b313d;
+    border-left: 4px solid #4c5c7a;
+    background: #11141a;
+    border-radius: 10px;
+    padding: 12px;
+}
+
+.session_item.session_active {
+    border-left-color: #2ea043;
+}
+
+.session_item_header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.session_item_title {
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.session_item_duration {
+    color: #c7d8ff;
+    font-weight: 700;
+}
+
+.session_item_body {
+    display: grid;
+    gap: 6px;
+    color: #c7d0dc;
+    font-size: 13px;
+}
+
+.session_active_now {
+    color: #9be9a8;
+    font-weight: 700;
 }
 
 /* Alerts popup */
@@ -443,5 +553,14 @@ code {
 
     .modal_meta {
         grid-template-columns: 1fr;
+    }
+
+    .session_stats_grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .session_item_header {
+        flex-direction: column;
+        align-items: flex-start;
     }
 }

@@ -69,7 +69,7 @@
       <div class="modal_header">
         <div>
           <h2>Device History</h2>
-          <p class="modal_subtitle">Recent timeline for the selected device</p>
+          <p class="modal_subtitle">Events and sessions for the selected device</p>
         </div>
         <button class="btn btn_close" id="close_history_btn" type="button">Close</button>
       </div>
@@ -83,7 +83,19 @@
         <div><b>Uptime:</b> <span id="history_uptime"></span></div>
       </div>
 
-      <div id="timeline_list" class="timeline_list"></div>
+      <div class="history_tabs">
+        <button id="tab_events_btn" class="tab_btn active" type="button">Events</button>
+        <button id="tab_sessions_btn" class="tab_btn" type="button">Sessions</button>
+      </div>
+
+      <div id="history_tab_events" class="history_tab">
+        <div id="timeline_list" class="timeline_list"></div>
+      </div>
+
+      <div id="history_tab_sessions" class="history_tab hidden">
+        <div id="sessions_stats" class="sessions_stats"></div>
+        <div id="sessions_list" class="sessions_list"></div>
+      </div>
     </div>
   </div>
 
@@ -103,6 +115,7 @@
 
 <script>
 let previousAlertCount = 0;
+let activeHistoryTab = "events";
 
 function escapeHtml(value) {
   if (value === null || value === undefined) return "";
@@ -240,6 +253,87 @@ function closeHistoryModal() {
   document.getElementById("history_modal").classList.add("hidden");
 }
 
+function setHistoryTab(tabName) {
+  activeHistoryTab = tabName;
+
+  const eventsBtn = document.getElementById("tab_events_btn");
+  const sessionsBtn = document.getElementById("tab_sessions_btn");
+  const eventsTab = document.getElementById("history_tab_events");
+  const sessionsTab = document.getElementById("history_tab_sessions");
+
+  if (tabName === "events") {
+    eventsBtn.classList.add("active");
+    sessionsBtn.classList.remove("active");
+    eventsTab.classList.remove("hidden");
+    sessionsTab.classList.add("hidden");
+  } else {
+    sessionsBtn.classList.add("active");
+    eventsBtn.classList.remove("active");
+    sessionsTab.classList.remove("hidden");
+    eventsTab.classList.add("hidden");
+  }
+}
+
+function renderSessionStats(stats) {
+  if (!stats) {
+    return `<div class="timeline_empty">No session stats yet.</div>`;
+  }
+
+  return `
+    <div class="session_stats_grid">
+      <div class="session_stat_card">
+        <div class="session_stat_label">Total Sessions</div>
+        <div class="session_stat_value">${escapeHtml(stats.total_sessions ?? 0)}</div>
+      </div>
+      <div class="session_stat_card">
+        <div class="session_stat_label">Completed</div>
+        <div class="session_stat_value">${escapeHtml(stats.completed_sessions ?? 0)}</div>
+      </div>
+      <div class="session_stat_card">
+        <div class="session_stat_label">Total Uptime</div>
+        <div class="session_stat_value">${escapeHtml(stats.total_uptime_human || "")}</div>
+      </div>
+      <div class="session_stat_card">
+        <div class="session_stat_label">Average Session</div>
+        <div class="session_stat_value">${escapeHtml(stats.avg_session_human || "")}</div>
+      </div>
+      <div class="session_stat_card">
+        <div class="session_stat_label">Longest Session</div>
+        <div class="session_stat_value">${escapeHtml(stats.longest_session_human || "")}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderSessionsList(sessions) {
+  if (!sessions || sessions.length === 0) {
+    return `<div class="timeline_empty">No sessions yet.</div>`;
+  }
+
+  return sessions.map(session => `
+    <div class="session_item ${session.is_active ? "session_active" : ""}">
+      <div class="session_item_header">
+        <div class="session_item_title">
+          ${session.is_active ? "Active session" : "Completed session"}
+          ${session.is_active ? '<span class="pill pill_ok">ACTIVE</span>' : ""}
+        </div>
+        <div class="session_item_duration">${escapeHtml(session.duration_human || "")}</div>
+      </div>
+
+      <div class="session_item_body">
+        <div><b>Start:</b> <code title="${escapeHtml(session.started_at || "")}">${escapeHtml(formatTimestampDetailed(session.started_at || ""))}</code></div>
+        <div><b>End:</b> ${
+          session.ended_at
+            ? `<code title="${escapeHtml(session.ended_at || "")}">${escapeHtml(formatTimestampDetailed(session.ended_at || ""))}</code>`
+            : '<span class="session_active_now">Now</span>'
+        }</div>
+        <div><b>Start IP:</b> ${escapeHtml(session.start_ip || "")}</div>
+        <div><b>End IP:</b> ${escapeHtml(session.end_ip || "")}</div>
+      </div>
+    </div>
+  `).join("");
+}
+
 async function refreshDevices() {
   const res = await fetch("/api/devices");
   const data = await res.json();
@@ -293,38 +387,57 @@ async function openHistoryModal(device) {
   document.getElementById("history_uptime").textContent = device.uptime || "";
 
   const timeline = document.getElementById("timeline_list");
-  timeline.innerHTML = `<div class="timeline_empty">Loading history...</div>`;
+  const statsBox = document.getElementById("sessions_stats");
+  const sessionsBox = document.getElementById("sessions_list");
 
+  timeline.innerHTML = `<div class="timeline_empty">Loading events...</div>`;
+  statsBox.innerHTML = `<div class="timeline_empty">Loading session stats...</div>`;
+  sessionsBox.innerHTML = `<div class="timeline_empty">Loading sessions...</div>`;
+
+  setHistoryTab("events");
   openHistoryModalShell();
 
   try {
-    const res = await fetch(`/api/devices/${encodeURIComponent(device.mac)}/events`);
-    const data = await res.json();
-    const events = data.events || [];
+    const [eventsRes, sessionsRes] = await Promise.all([
+      fetch(`/api/devices/${encodeURIComponent(device.mac)}/events`),
+      fetch(`/api/devices/${encodeURIComponent(device.mac)}/sessions`)
+    ]);
+
+    const eventsData = await eventsRes.json();
+    const sessionsData = await sessionsRes.json();
+
+    const events = eventsData.events || [];
+    const stats = sessionsData.stats || {};
+    const sessions = sessionsData.sessions || [];
 
     if (events.length === 0) {
-      timeline.innerHTML = `<div class="timeline_empty">No history yet.</div>`;
-      return;
-    }
-
-    timeline.innerHTML = events.map(ev => `
-      <div class="timeline_item ${eventClass(ev.event_type)}">
-        <div class="timeline_time">
-          <code title="${escapeHtml(ev.event_time || "")}">${escapeHtml(formatTimestampDetailed(ev.event_time || ""))}</code>
-        </div>
-        <div class="timeline_body">
-          <div class="timeline_event">${escapeHtml(prettyEventType(ev.event_type))}</div>
-          <div class="timeline_meta">
-            <span><b>IP:</b> ${escapeHtml(ev.ip || "")}</span>
-            <span><b>Vendor:</b> ${escapeHtml(ev.vendor || "")}</span>
-            <span><b>Name:</b> ${escapeHtml(ev.friendly_name || ev.hostname || "")}</span>
+      timeline.innerHTML = `<div class="timeline_empty">No history events yet.</div>`;
+    } else {
+      timeline.innerHTML = events.map(ev => `
+        <div class="timeline_item ${eventClass(ev.event_type)}">
+          <div class="timeline_time">
+            <code title="${escapeHtml(ev.event_time || "")}">${escapeHtml(formatTimestampDetailed(ev.event_time || ""))}</code>
+          </div>
+          <div class="timeline_body">
+            <div class="timeline_event">${escapeHtml(prettyEventType(ev.event_type))}</div>
+            <div class="timeline_meta">
+              <span><b>IP:</b> ${escapeHtml(ev.ip || "")}</span>
+              <span><b>Vendor:</b> ${escapeHtml(ev.vendor || "")}</span>
+              <span><b>Name:</b> ${escapeHtml(ev.friendly_name || ev.hostname || "")}</span>
+            </div>
           </div>
         </div>
-      </div>
-    `).join("");
+      `).join("");
+    }
+
+    statsBox.innerHTML = renderSessionStats(stats);
+    sessionsBox.innerHTML = renderSessionsList(sessions);
+
   } catch (err) {
     console.error("Failed to load history:", err);
-    timeline.innerHTML = `<div class="timeline_empty">Failed to load history.</div>`;
+    timeline.innerHTML = `<div class="timeline_empty">Failed to load events.</div>`;
+    statsBox.innerHTML = `<div class="timeline_empty">Failed to load session stats.</div>`;
+    sessionsBox.innerHTML = `<div class="timeline_empty">Failed to load sessions.</div>`;
   }
 }
 
@@ -427,6 +540,9 @@ async function refreshAll() {
 document.getElementById("alerts_bell_btn").addEventListener("click", openAlertsModal);
 document.getElementById("clear_alerts_btn").addEventListener("click", clearAlerts);
 document.getElementById("close_history_btn").addEventListener("click", closeHistoryModal);
+
+document.getElementById("tab_events_btn").addEventListener("click", () => setHistoryTab("events"));
+document.getElementById("tab_sessions_btn").addEventListener("click", () => setHistoryTab("sessions"));
 
 document.getElementById("history_modal").addEventListener("click", (e) => {
   if (e.target.id === "history_modal") {
